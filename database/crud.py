@@ -13,8 +13,8 @@ class CrudCategory:
     def __init__(self):
         self.session = AsyncSessionLocal
 
-    # Получить список абсолютно всех категорий из базы
     async def get_all_categories(self) -> list[Category]:
+        """Возвращает список всех существующих категорий мебели."""
         async with self.session() as session:
             try:
                 stmt = select(Category)
@@ -24,8 +24,8 @@ class CrudCategory:
                 logger.exception("Ошибка при получении всех категорий")
                 return []
 
-    # Добавить новую категорию
     async def create_category(self, name: str, description: str) -> bool:
+        """Создает новую категорию. Возвращает False при дубликате или ошибке БД."""
         async with self.session() as session:
             try:
                 new_cat = Category(name=name, description=description)
@@ -35,7 +35,7 @@ class CrudCategory:
                 return True
             except IntegrityError:
                 await session.rollback()
-                logger.warning("Дубликат категории: %s", name)
+                logger.warning("Категория уже существует: %s", name)
                 return False
             except SQLAlchemyError:
                 await session.rollback()
@@ -43,6 +43,7 @@ class CrudCategory:
                 return False
 
     async def check_category_by_name(self, name: str) -> bool:
+        """Проверяет существование категории по точному названию."""
         async with self.session() as session:
             try:
                 stmt = select(Category.id).where(Category.name == name)
@@ -57,8 +58,8 @@ class CrudFurniture:
     def __init__(self):
         self.session = AsyncSessionLocal
 
-    # Добавить товар (мебель)
     async def create_furniture(self, description: str, category: str, country: str) -> Optional[Furniture]:
+        """Создает карточку мебели. Возвращает созданный объект или None при ошибке."""
         async with self.session() as session:
             try:
                 item = Furniture(
@@ -75,14 +76,13 @@ class CrudFurniture:
                 logger.exception("Ошибка при создании мебели")
                 return None
 
-    # Привязать пачку фотографий (file_id) к товару
     async def add_photos_to_furniture(self, furniture_id: int, photos: list[str]) -> bool:
+        """Пакетно привязывает список Telegram file_id к мебели."""
         if not photos:
             return True
 
         async with self.session() as session:
             try:
-                # Пакетная вставка вместо цикла session.add()
                 photo_objects = [
                     FurniturePhoto(furniture_id=furniture_id, file_id=file_id)
                     for file_id in photos
@@ -94,9 +94,9 @@ class CrudFurniture:
                 await session.rollback()
                 logger.exception("Ошибка сохранения фото для мебели ID %s", furniture_id)
                 return False
-    
-    # Получить мебель по категории и стране с предзагрузкой фото
+
     async def get_furniture(self, category: str, country: Optional[str] = None) -> list[Furniture]:
+        """Возвращает мебель по категории и стране с предзагрузкой фото (selectinload)."""
         async with self.session() as session:
             try:
                 stmt = (
@@ -107,7 +107,7 @@ class CrudFurniture:
 
                 if country:
                     stmt = stmt.where(Furniture.country_origin == country)
-                
+
                 result = await session.execute(stmt)
                 return list(result.scalars().all())
             except SQLAlchemyError:
@@ -115,6 +115,7 @@ class CrudFurniture:
                 return []
 
     async def get_all_furniture(self) -> list[Furniture]:
+        """Возвращает всю мебель из базы с предзагрузкой связанных фото (selectinload)."""
         async with self.session() as session:
             try:
                 stmt = select(Furniture).options(selectinload(Furniture.photos))
@@ -125,6 +126,7 @@ class CrudFurniture:
                 return []
 
     async def delete_furniture(self, furniture_id: int) -> bool:
+        """Удаляет мебель по ID. Связанные фото удаляются каскадно на уровне ORM."""
         async with self.session() as session:
             try:
                 item = await session.get(Furniture, furniture_id)
@@ -136,11 +138,11 @@ class CrudFurniture:
                 await session.commit()
                 logger.info("Мебель с ID %s успешно удалена", furniture_id)
                 return True
-
             except SQLAlchemyError:
                 await session.rollback()
                 logger.exception("Ошибка при удалении мебели с ID %s", furniture_id)
                 return False
+
 
 class CrudUser:
     def __init__(self):
@@ -153,6 +155,7 @@ class CrudUser:
         firstname: Optional[str] = None,
         lastname: Optional[str] = None
     ) -> Optional[User]:
+        """Возвращает существующего пользователя или создает нового. При ошибке БД возвращает None."""
         async with self.session() as session:
             try:
                 stmt = select(User).where(User.telegram_id == telegram_id)
@@ -176,4 +179,4 @@ class CrudUser:
             except SQLAlchemyError:
                 await session.rollback()
                 logger.exception("Ошибка при получении или создании пользователя %s", telegram_id)
-                return None    
+                return None
