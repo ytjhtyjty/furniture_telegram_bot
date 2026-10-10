@@ -1,25 +1,27 @@
 import logging
-from typing import Optional, List
+from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from database.engine import AsyncSessionLocal
-from database.models import Category, Furniture, FurniturePhoto
+from database.models import Category, Furniture, FurniturePhoto, User
+
+logger = logging.getLogger(__name__)
+
 
 class CrudCategory:
     def __init__(self):
         self.session = AsyncSessionLocal
 
     # Получить список абсолютно всех категорий из базы
-    async def get_all_categories(self) -> List[Category]:
+    async def get_all_categories(self) -> list[Category]:
         async with self.session() as session:
             try:
                 stmt = select(Category)
                 result = await session.execute(stmt)
-                all_categories = result.scalars().all()
-                return list(all_categories) if all_categories else []
-            except SQLAlchemyError as exc:
-                logging.exception("Ошибка при получении всех категорий: %s", exc)
+                return list(result.scalars().all())
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении всех категорий")
                 return []
 
     # Добавить новую категорию
@@ -29,15 +31,15 @@ class CrudCategory:
                 new_cat = Category(name=name, description=description)
                 session.add(new_cat)
                 await session.commit()
-                logging.info(f"Создана категория: {name}")
+                logger.info("Создана категория: %s", name)
                 return True
-            except IntegrityError as exc:
-                await session.rollback() # Откат, если категория уже существует
-                logging.error(f"Дубликат категории: {exc}")
-                return False
-            except SQLAlchemyError as exc:
+            except IntegrityError:
                 await session.rollback()
-                logging.exception(f"Ошибка БД: {exc}")
+                logger.warning("Дубликат категории: %s", name)
+                return False
+            except SQLAlchemyError:
+                await session.rollback()
+                logger.exception("Ошибка БД при создании категории")
                 return False
 
 
@@ -56,27 +58,34 @@ class CrudFurniture:
                 )
                 session.add(item)
                 await session.commit()
-                await session.refresh(item) # Обновляем объект, чтобы получить присвоенный ID
+                await session.refresh(item)
                 return item
-            except SQLAlchemyError as exc:
+            except SQLAlchemyError:
                 await session.rollback()
-                logging.exception(f"Ошибка при создании мебели: {exc}")
+                logger.exception("Ошибка при создании мебели")
                 return None
 
     # Привязать пачку фотографий (file_id) к товару
     async def add_photos_to_furniture(self, furniture_id: int, photos: list[str]) -> bool:
+        if not photos:
+            return True
+
         async with self.session() as session:
             try:
-                for file_id in photos:
-                    photo_obj = FurniturePhoto(furniture_id=furniture_id, file_id=file_id)
-                    session.add(photo_obj)
+                # Пакетная вставка вместо цикла session.add()
+                photo_objects = [
+                    FurniturePhoto(furniture_id=furniture_id, file_id=file_id)
+                    for file_id in photos
+                ]
+                session.add_all(photo_objects)
                 await session.commit()
                 return True
-            except SQLAlchemyError as exc:
+            except SQLAlchemyError:
                 await session.rollback()
-                logging.exception(f"Ошибка сохранения фото: {exc}")
+                logger.exception("Ошибка сохранения фото для мебели ID %s", furniture_id)
                 return False
     
+    # Получить мебель по категории и стране с предзагрузкой фото
     async def get_furniture(self, category: str, country: Optional[str] = None) -> list[Furniture]:
         async with self.session() as session:
             try:
@@ -90,8 +99,7 @@ class CrudFurniture:
                     stmt = stmt.where(Furniture.country_origin == country)
                 
                 result = await session.execute(stmt)
-                furniture_list = result.scalars().all()
-                return list(furniture_list) if furniture_list else []
-            except SQLAlchemyError as exc:
-                logging.exception("Ошибка при получении мебели: %s", exc)
+                return list(result.scalars().all())
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении мебели для категории %s", category)
                 return []
