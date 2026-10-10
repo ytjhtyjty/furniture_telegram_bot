@@ -42,6 +42,16 @@ class CrudCategory:
                 logger.exception("Ошибка БД при создании категории")
                 return False
 
+    async def check_category_by_name(self, name: str) -> Optional[Category]:
+        async with self.session() as session:
+            try:
+                stmt = select(Category.id).where(Category.name == name)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none() is not None
+            except SQLAlchemyError:
+                logger.exception("Ошибка при проверке категории: %s", name)
+                return False
+
 
 class CrudFurniture:
     def __init__(self):
