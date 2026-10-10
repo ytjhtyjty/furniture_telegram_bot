@@ -136,8 +136,44 @@ class CrudFurniture:
                 await session.commit()
                 logger.info("Мебель с ID %s успешно удалена", furniture_id)
                 return True
-                
+
             except SQLAlchemyError:
                 await session.rollback()
                 logger.exception("Ошибка при удалении мебели с ID %s", furniture_id)
                 return False
+
+class CrudUser:
+    def __init__(self):
+        self.session = AsyncSessionLocal
+
+    async def get_or_create_user(
+        self,
+        telegram_id: int,
+        username: Optional[str] = None,
+        firstname: Optional[str] = None,
+        lastname: Optional[str] = None
+    ) -> Optional[User]:
+        async with self.session() as session:
+            try:
+                stmt = select(User).where(User.telegram_id == telegram_id)
+                result = await session.execute(stmt)
+                user = result.scalar_one_or_none()
+
+                if user:
+                    return user
+
+                new_user = User(
+                    telegram_id=telegram_id,
+                    username=username,
+                    firstname=firstname,
+                    lastname=lastname
+                )
+                session.add(new_user)
+                await session.commit()
+                await session.refresh(new_user)
+                logger.info("Создан новый пользователь с telegram_id: %s", telegram_id)
+                return new_user
+            except SQLAlchemyError:
+                await session.rollback()
+                logger.exception("Ошибка при получении или создании пользователя %s", telegram_id)
+                return None    
