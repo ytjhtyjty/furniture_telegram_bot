@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, List
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from database.engine import AsyncSessionLocal
 from database.models import Category, Furniture, FurniturePhoto
@@ -75,3 +76,22 @@ class CrudFurniture:
                 await session.rollback()
                 logging.exception(f"Ошибка сохранения фото: {exc}")
                 return False
+    
+    async def get_furniture(self, category: str, country: Optional[str] = None) -> list[Furniture]:
+        async with self.session() as session:
+            try:
+                stmt = (
+                    select(Furniture)
+                    .options(selectinload(Furniture.photos))
+                    .where(Furniture.category_name == category)
+                )
+
+                if country:
+                    stmt = stmt.where(Furniture.country_origin == country)
+                
+                result = await session.execute(stmt)
+                furniture_list = result.scalars().all()
+                return list(furniture_list) if furniture_list else []
+            except SQLAlchemyError as exc:
+                logging.exception("Ошибка при получении мебели: %s", exc)
+                return []
