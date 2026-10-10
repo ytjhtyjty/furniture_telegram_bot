@@ -9,9 +9,12 @@ from aiogram.methods import DeleteWebhook
 
 from settings.config import ConfigBot
 from handlers.admin import router as admin_router
+from handlers.backend import router as backend_router
 
 from database.engine import async_engine, Base
 from database import models
+
+from utils.filters import IsAdmin
 
 
 async def init_db():
@@ -29,8 +32,13 @@ async def main():
     bot = Bot(token=ConfigBot.TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
-    # Подключаем роутер админки
+    # Фильтрация
+    admin_router.message.filter(IsAdmin())
+    admin_router.callback_query.filter(IsAdmin())
+
+    # Подключаем роутеры
     dp.include_router(admin_router)
+    dp.include_router(backend_router)
 
     # Удаляем вебхуки и старые сообщения, пришедшие во время отключения
     await bot(DeleteWebhook(drop_pending_updates=True))
