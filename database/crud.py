@@ -113,3 +113,13 @@ class CrudFurniture:
             except SQLAlchemyError:
                 logger.exception("Ошибка при получении мебели для категории %s", category)
                 return []
+
+    async def get_all_furniture(self) -> list[Furniture]:
+        async with self.session() as session:
+            try:
+                stmt = select(Furniture).options(selectinload(Furniture.photos))
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении всей мебели")
+                return []
