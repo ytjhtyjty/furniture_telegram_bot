@@ -1,24 +1,27 @@
 import logging
-from typing import Optional, List
+from typing import Optional
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from database.engine import AsyncSessionLocal
-from database.models import Category, Furniture, FurniturePhoto
+from database.models import Category, Furniture, FurniturePhoto, User
+
+logger = logging.getLogger(__name__)
+
 
 class CrudCategory:
     def __init__(self):
         self.session = AsyncSessionLocal
 
     # Получить список абсолютно всех категорий из базы
-    async def get_all_categories(self) -> List[Category]:
+    async def get_all_categories(self) -> list[Category]:
         async with self.session() as session:
             try:
                 stmt = select(Category)
                 result = await session.execute(stmt)
-                all_categories = result.scalars().all()
-                return list(all_categories) if all_categories else []
-            except SQLAlchemyError as exc:
-                logging.exception("Ошибка при получении всех категорий: %s", exc)
+                return list(result.scalars().all())
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении всех категорий")
                 return []
 
     # Добавить новую категорию
@@ -28,15 +31,25 @@ class CrudCategory:
                 new_cat = Category(name=name, description=description)
                 session.add(new_cat)
                 await session.commit()
-                logging.info(f"Создана категория: {name}")
+                logger.info("Создана категория: %s", name)
                 return True
-            except IntegrityError as exc:
-                await session.rollback() # Откат, если категория уже существует
-                logging.error(f"Дубликат категории: {exc}")
-                return False
-            except SQLAlchemyError as exc:
+            except IntegrityError:
                 await session.rollback()
-                logging.exception(f"Ошибка БД: {exc}")
+                logger.warning("Дубликат категории: %s", name)
+                return False
+            except SQLAlchemyError:
+                await session.rollback()
+                logger.exception("Ошибка БД при создании категории")
+                return False
+
+    async def check_category_by_name(self, name: str) -> bool:
+        async with self.session() as session:
+            try:
+                stmt = select(Category.id).where(Category.name == name)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none() is not None
+            except SQLAlchemyError:
+                logger.exception("Ошибка при проверке категории: %s", name)
                 return False
 
 
@@ -55,23 +68,112 @@ class CrudFurniture:
                 )
                 session.add(item)
                 await session.commit()
-                await session.refresh(item) # Обновляем объект, чтобы получить присвоенный ID
+                await session.refresh(item)
                 return item
-            except SQLAlchemyError as exc:
+            except SQLAlchemyError:
                 await session.rollback()
-                logging.exception(f"Ошибка при создании мебели: {exc}")
+                logger.exception("Ошибка при создании мебели")
                 return None
 
     # Привязать пачку фотографий (file_id) к товару
     async def add_photos_to_furniture(self, furniture_id: int, photos: list[str]) -> bool:
+        if not photos:
+            return True
+
         async with self.session() as session:
             try:
-                for file_id in photos:
-                    photo_obj = FurniturePhoto(furniture_id=furniture_id, file_id=file_id)
-                    session.add(photo_obj)
+                # Пакетная вставка вместо цикла session.add()
+                photo_objects = [
+                    FurniturePhoto(furniture_id=furniture_id, file_id=file_id)
+                    for file_id in photos
+                ]
+                session.add_all(photo_objects)
                 await session.commit()
                 return True
-            except SQLAlchemyError as exc:
+            except SQLAlchemyError:
                 await session.rollback()
-                logging.exception(f"Ошибка сохранения фото: {exc}")
+                logger.exception("Ошибка сохранения фото для мебели ID %s", furniture_id)
                 return False
+    
+    # Получить мебель по категории и стране с предзагрузкой фото
+    async def get_furniture(self, category: str, country: Optional[str] = None) -> list[Furniture]:
+        async with self.session() as session:
+            try:
+                stmt = (
+                    select(Furniture)
+                    .options(selectinload(Furniture.photos))
+                    .where(Furniture.category_name == category)
+                )
+
+                if country:
+                    stmt = stmt.where(Furniture.country_origin == country)
+                
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении мебели для категории %s", category)
+                return []
+
+    async def get_all_furniture(self) -> list[Furniture]:
+        async with self.session() as session:
+            try:
+                stmt = select(Furniture).options(selectinload(Furniture.photos))
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении всей мебели")
+                return []
+
+    async def delete_furniture(self, furniture_id: int) -> bool:
+        async with self.session() as session:
+            try:
+                item = await session.get(Furniture, furniture_id)
+                if not item:
+                    logger.warning("Мебель с ID %s не найдена для удаления", furniture_id)
+                    return False
+
+                await session.delete(item)
+                await session.commit()
+                logger.info("Мебель с ID %s успешно удалена", furniture_id)
+                return True
+
+            except SQLAlchemyError:
+                await session.rollback()
+                logger.exception("Ошибка при удалении мебели с ID %s", furniture_id)
+                return False
+
+class CrudUser:
+    def __init__(self):
+        self.session = AsyncSessionLocal
+
+    async def get_or_create_user(
+        self,
+        telegram_id: int,
+        username: Optional[str] = None,
+        firstname: Optional[str] = None,
+        lastname: Optional[str] = None
+    ) -> Optional[User]:
+        async with self.session() as session:
+            try:
+                stmt = select(User).where(User.telegram_id == telegram_id)
+                result = await session.execute(stmt)
+                user = result.scalar_one_or_none()
+
+                if user:
+                    return user
+
+                new_user = User(
+                    telegram_id=telegram_id,
+                    username=username,
+                    firstname=firstname,
+                    lastname=lastname
+                )
+                session.add(new_user)
+                await session.commit()
+                await session.refresh(new_user)
+                logger.info("Создан новый пользователь с telegram_id: %s", telegram_id)
+                return new_user
+            except SQLAlchemyError:
+                await session.rollback()
+                logger.exception("Ошибка при получении или создании пользователя %s", telegram_id)
+                return None    
