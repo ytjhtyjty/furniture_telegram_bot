@@ -123,3 +123,21 @@ class CrudFurniture:
             except SQLAlchemyError:
                 logger.exception("Ошибка при получении всей мебели")
                 return []
+
+    async def delete_furniture(self, furniture_id: int) -> bool:
+        async with self.session() as session:
+            try:
+                item = await session.get(Furniture, furniture_id)
+                if not item:
+                    logger.warning("Мебель с ID %s не найдена для удаления", furniture_id)
+                    return False
+
+                await session.delete(item)
+                await session.commit()
+                logger.info("Мебель с ID %s успешно удалена", furniture_id)
+                return True
+                
+            except SQLAlchemyError:
+                await session.rollback()
+                logger.exception("Ошибка при удалении мебели с ID %s", furniture_id)
+                return False
