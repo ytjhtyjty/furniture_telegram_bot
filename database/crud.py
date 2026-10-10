@@ -42,7 +42,7 @@ class CrudCategory:
                 logger.exception("Ошибка БД при создании категории")
                 return False
 
-    async def check_category_by_name(self, name: str) -> Optional[Category]:
+    async def check_category_by_name(self, name: str) -> bool:
         async with self.session() as session:
             try:
                 stmt = select(Category.id).where(Category.name == name)
