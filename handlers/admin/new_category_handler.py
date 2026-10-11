@@ -1,9 +1,12 @@
+from html import escape
+
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from states.states import NewCategoryStates
 from keyboard.keyboard_builder import make_row_inline_keyboards
 from keyboard.button_template import build_cancel_kb
 from database.crud import CrudCategory
+from .main_admin import show_admin_panel
 
 router = Router()
 
@@ -22,7 +25,7 @@ async def start_add_category(callback: types.CallbackQuery, state: FSMContext):
 # 2. Прием названия категории
 @router.message(NewCategoryStates.name_category)
 async def process_category_name(message: types.Message, state: FSMContext):
-    name = message.text.strip()
+    name = (message.text or "").strip()
     if not name:
         await message.answer("⚠️ Название не может быть пустым. Введите название:")
         return
@@ -30,7 +33,7 @@ async def process_category_name(message: types.Message, state: FSMContext):
     await state.update_data(name=name)
     await state.set_state(NewCategoryStates.description_category)
     await message.answer(
-        f"Отлично! Название: <b>{name}</b>.\n\n"
+        f"Отлично! Название: <b>{escape(name)}</b>.\n\n"
         "Теперь введите краткое описание категории (2-3 слова):",
         reply_markup=make_row_inline_keyboards(build_cancel_kb)
     )
@@ -38,7 +41,11 @@ async def process_category_name(message: types.Message, state: FSMContext):
 # 3. Прием описания и подтверждение
 @router.message(NewCategoryStates.description_category)
 async def process_category_description(message: types.Message, state: FSMContext):
-    description = message.text.strip()
+    description = (message.text or "").strip()
+    if not description:
+        await message.answer("⚠️ Описание не может быть пустым. Введите описание:")
+        return
+
     await state.update_data(description=description)
     data = await state.get_data()
 
@@ -49,8 +56,8 @@ async def process_category_description(message: types.Message, state: FSMContext
 
     await message.answer(
         "🔍 <b>Проверьте данные новой категории:</b>\n\n"
-        f"🏷 <b>Название:</b> {data['name']}\n"
-        f"📝 <b>Описание:</b> {description}\n\n"
+        f"🏷 <b>Название:</b> {escape(data['name'])}\n"
+        f"📝 <b>Описание:</b> {escape(description)}\n\n"
         "Сохранить эту категорию в базу?",
         reply_markup=make_row_inline_keyboards(confirm_kb)
     )
@@ -67,17 +74,22 @@ async def confirm_category_save(callback: types.CallbackQuery, state: FSMContext
     crud = CrudCategory()
     success = await crud.create_category(name=data['name'], description=data.get('description', ''))
 
-    if success:
-        await callback.message.answer(f"🎉 Категория <b>{data['name']}</b> успешно сохранена в базе данных!")
-    else:
-        await callback.message.answer("❌ Ошибка: возможно категория с таким именем уже существует.")
-
     await state.clear()
+
+    if success:
+        await callback.message.edit_text("✅ Категория сохранена в базе")
+    else:
+        await callback.message.edit_text("❌ Ошибка: возможно категория с таким именем уже существует.")
+
+    # Возвращаем админа в админ-панель
+    await show_admin_panel(callback.message)
     await callback.answer()
 
 # 5. Отмена в любой момент
 @router.callback_query(F.data == "cancel_category")
 async def cancel_category_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.answer("🚫 Добавление категории отменено.")
+    await callback.message.edit_text("🚫 Добавление категории отменено.")
+    # Возвращаем админа в админ-панель
+    await show_admin_panel(callback.message)
     await callback.answer()

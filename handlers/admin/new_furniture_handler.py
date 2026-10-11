@@ -1,9 +1,12 @@
+from html import escape
+
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from states.states import NewFurnitureStates
 from keyboard.keyboard_builder import make_row_keyboards, make_row_inline_keyboards
 from keyboard.button_template import furniture_cancel_kb, country_of_origin_kb, kitchen_subcategory_inline_kb
 from database.crud import CrudCategory, CrudFurniture
+from .main_admin import show_admin_panel
 
 router = Router()
 
@@ -26,7 +29,7 @@ async def start_add_furniture(callback: types.CallbackQuery, state: FSMContext):
 # 2. Получение описания и динамическая выдача категорий из базы
 @router.message(NewFurnitureStates.description)
 async def process_furniture_description(message: types.Message, state: FSMContext):
-    description = message.text.strip()
+    description = (message.text or "").strip()
     if not description:
         await message.answer("⚠️ Описание не может быть пустым. Попробуйте еще раз:")
         return
@@ -43,9 +46,11 @@ async def process_furniture_description(message: types.Message, state: FSMContex
         return
 
     # Собираем список названий категорий для клавиатуры
-    category_buttons = [cat.name for cat in categories_from_db]
-    category_buttons.append("❌ Отменить")
+    category_names = [cat.name for cat in categories_from_db]
+    category_buttons = category_names + ["❌ Отменить"]
 
+    # Запоминаем, какие категории реально есть в базе, чтобы проверить выбор на шаге 3
+    await state.update_data(category_names=category_names)
     await state.set_state(NewFurnitureStates.category)
     await message.answer(
         "<b>Шаг 2:</b> Выберите категорию для мебели из кнопок ниже:",
@@ -55,13 +60,27 @@ async def process_furniture_description(message: types.Message, state: FSMContex
 # 3. Обработка категории и умное ветвление (Кухня vs Остальное)
 @router.message(NewFurnitureStates.category)
 async def process_furniture_category(message: types.Message, state: FSMContext):
-    if message.text == "❌ Отменить":
+    category_name = (message.text or "").strip()
+
+    if category_name == "❌ Отменить":
         await state.clear()
         await message.answer("🚫 Добавление отменено.", reply_markup=types.ReplyKeyboardRemove())
+        # Возвращаем админа в админ-панель
+        await show_admin_panel(message)
         return
 
-    category_name = message.text.strip()
+    # Принимаем только категории, которые есть в базе (список сохранён на шаге 2)
+    data = await state.get_data()
+    if category_name not in data.get("category_names", []):
+        await message.answer("⚠️ Такой категории нет. Выберите категорию кнопкой из списка ниже.")
+        return
+
     await state.update_data(category=category_name)
+    # Убираем клавиатуру с категориями (inline-клавиатуру следующего шага в том же сообщении не отправить)
+    await message.answer(
+        f"✅ Категория: <b>{escape(category_name)}</b>",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
 
     # Проверяем, кухня ли это
     if "кухонная" in category_name.lower() or "кухн" in category_name.lower():
@@ -80,17 +99,33 @@ async def process_furniture_category(message: types.Message, state: FSMContext):
             reply_markup=make_row_inline_keyboards(country_of_origin_kb)
         )
 
-# 4а. Обработка формы кухни (Прямая / Угловая)
-@router.callback_query(NewFurnitureStates.kitchen_type)
+# 4а. Обработка формы кухни (Прямая / Угловая / Назад)
+@router.callback_query(
+    NewFurnitureStates.kitchen_type,
+    F.data.in_({"straight_kitchen", "corner_kitchen", "back_to_main"})
+)
 async def process_kitchen_type(callback: types.CallbackQuery, state: FSMContext):
+    if callback.data == "back_to_main":
+        await state.clear()
+        await show_admin_panel(callback.message)
+        return
+
     kitchen_type = "Прямая кухня" if callback.data == "straight_kitchen" else "Угловая кухня"
     await state.update_data(kitchen_type=kitchen_type)
     await init_photo_upload(callback.message, state)
     await callback.answer()
 
-# 4б. Обработка страны
-@router.callback_query(NewFurnitureStates.country)
+# 4б. Обработка страны (Россия / Турция / Назад)
+@router.callback_query(
+    NewFurnitureStates.country,
+    F.data.in_({"russian_origin", "turkey_origin", "back_to_main"})
+)
 async def process_country(callback: types.CallbackQuery, state: FSMContext):
+    if callback.data == "back_to_main":
+        await state.clear()
+        await show_admin_panel(callback.message)
+        return
+
     country = "Россия" if callback.data == "russian_origin" else "Турция"
     await state.update_data(country=country)
     await init_photo_upload(callback.message, state)
@@ -160,22 +195,44 @@ async def finish_furniture_save(callback: types.CallbackQuery, state: FSMContext
         return
 
     # 2. Сохраняем все file_id фото в таблице furniture_photos
-    await crud.add_photos_to_furniture(furniture.id, photos)
+    photos_saved = await crud.add_photos_to_furniture(furniture.id, photos)
+
+    if not photos_saved:
+        # Откатываем: не оставляем в базе мебель без фото
+        rolled_back = await crud.delete_furniture(furniture.id)
+        if rolled_back:
+            # Состояние не очищаем: фото остались в FSM, можно нажать «Завершить» ещё раз
+            await callback.message.answer(
+                "❌ Не удалось сохранить фотографии, мебель не добавлена.\n"
+                "Нажмите «Завершить добавление» ещё раз или отмените."
+            )
+        else:
+            await callback.message.answer(
+                f"❌ Не удалось сохранить фотографии, и мебель (ID {furniture.id}) осталась в базе без фото. "
+                "Удалите её через «Удалить мебель»."
+            )
+            await state.clear()
+        await callback.answer()
+        return
 
     await callback.message.answer(
         "🎉 <b>Мебель успешно добавлена в каталог!</b>\n\n"
-        f"📦 <b>Категория:</b> {data['category']}\n"
-        f"🌍 <b>Страна/Тип:</b> {data.get('kitchen_type') or data.get('country')}\n"
+        f"📦 <b>Категория:</b> {escape(data['category'])}\n"
+        f"🌍 <b>Страна/Тип:</b> {escape(data.get('kitchen_type') or data.get('country') or '—')}\n"
         f"🖼 <b>Количество фото:</b> {len(photos)} шт.\n\n"
-        f"📝 <b>Описание:</b>\n{desc}"
+        f"📝 <b>Описание:</b>\n{escape(desc)}"
     )
 
     await state.clear()
+    # Возвращаем админа в админ-панель
+    await show_admin_panel(callback.message)
     await callback.answer()
 
 # 8. Отмена
 @router.callback_query(F.data == "cancel_furniture")
 async def cancel_furniture_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.answer("🚫 Добавление мебели отменено.")
+    await callback.message.edit_text("🚫 Добавление мебели отменено.")
+    # Возвращаем админа в админ-панель
+    await show_admin_panel(callback.message)
     await callback.answer()
