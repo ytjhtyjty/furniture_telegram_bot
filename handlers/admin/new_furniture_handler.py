@@ -1,3 +1,4 @@
+import asyncio
 from html import escape
 
 from aiogram import Router, F, types
@@ -9,6 +10,7 @@ from database.crud import CrudCategory, CrudFurniture
 from .main_admin import show_admin_panel
 
 router = Router()
+_photo_lock = asyncio.Lock()
 
 # 1. Старт создания мебели
 @router.callback_query(F.data == "new_furniture")
@@ -66,7 +68,7 @@ async def process_furniture_category(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("🚫 Добавление отменено.", reply_markup=types.ReplyKeyboardRemove())
         # Возвращаем админа в админ-панель
-        await show_admin_panel(message)
+        await show_admin_panel(message, state)
         return
 
     # Принимаем только категории, которые есть в базе (список сохранён на шаге 2)
@@ -76,7 +78,7 @@ async def process_furniture_category(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(category=category_name)
-    # Убираем клавиатуру с категориями (inline-клавиатуру следующего шага в том же сообщении не отправить)
+    # Убираем клавиатуру с категориями
     await message.answer(
         f"✅ Категория: <b>{escape(category_name)}</b>",
         reply_markup=types.ReplyKeyboardRemove()
@@ -105,15 +107,15 @@ async def process_furniture_category(message: types.Message, state: FSMContext):
     F.data.in_({"straight_kitchen", "corner_kitchen", "back_to_main"})
 )
 async def process_kitchen_type(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     if callback.data == "back_to_main":
         await state.clear()
-        await show_admin_panel(callback.message)
+        await show_admin_panel(callback.message, state)
         return
 
     kitchen_type = "Прямая кухня" if callback.data == "straight_kitchen" else "Угловая кухня"
     await state.update_data(kitchen_type=kitchen_type)
     await init_photo_upload(callback.message, state)
-    await callback.answer()
 
 # 4б. Обработка страны (Россия / Турция / Назад)
 @router.callback_query(
@@ -121,20 +123,20 @@ async def process_kitchen_type(callback: types.CallbackQuery, state: FSMContext)
     F.data.in_({"russian_origin", "turkey_origin", "back_to_main"})
 )
 async def process_country(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     if callback.data == "back_to_main":
         await state.clear()
-        await show_admin_panel(callback.message)
+        await show_admin_panel(callback.message, state)
         return
 
     country = "Россия" if callback.data == "russian_origin" else "Турция"
     await state.update_data(country=country)
     await init_photo_upload(callback.message, state)
-    await callback.answer()
 
 # 5. Переход к загрузке фото
 async def init_photo_upload(message: types.Message, state: FSMContext):
     await state.set_state(NewFurnitureStates.photos)
-    await state.update_data(photos=[]) # Создаем пустой список для file_id
+    await state.update_data(photos=[])  # Создаем пустой список для file_id
 
     finish_kb = [
         ("✅ Завершить добавление", "finish_furniture_creation"),
@@ -150,29 +152,35 @@ async def init_photo_upload(message: types.Message, state: FSMContext):
 # 6. Прием каждого фото и сбор file_id в память FSM
 @router.message(NewFurnitureStates.photos, F.photo)
 async def process_incoming_photo(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
+    async with _photo_lock:
+        data = await state.get_data()
+        photos = data.get("photos", [])
 
-    if len(photos) >= 10:
-        await message.answer("⚠️ Достигнут лимит (максимум 10 фотографий). Нажмите «Завершить добавление».")
-        return
+        if len(photos) >= 10:
+            await message.answer("⚠️ Достигнут лимит (максимум 10 фотографий). Нажмите «Завершить добавление».")
+            return
 
-    # Берем фото в самом высоком качестве (последний элемент массива)
-    best_photo_file_id = message.photo[-1].file_id
-    photos.append(best_photo_file_id)
-    await state.update_data(photos=photos)
-
-    await message.answer(f"📸 Фото принято ({len(photos)} из 10). Отправьте еще или завершите.")
+        # Берем фото в самом высоком качестве (последний элемент массива)
+        best_photo_file_id = message.photo[-1].file_id
+        if best_photo_file_id not in photos:
+            photos.append(best_photo_file_id)
+            await state.update_data(photos=photos)
+            await message.answer(f"📸 Фото принято ({len(photos)} из 10). Отправьте еще или завершите.")
 
 # 7. Финал: сохранение товара и всех фото в базу
 @router.callback_query(F.data == "finish_furniture_creation")
 async def finish_furniture_save(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     data = await state.get_data()
-    photos = data.get("photos", [])
 
+    if not data or "category" not in data:
+        await callback.message.answer("⚠️ Данные устарели или не найдены. Начните добавление мебели сначала.")
+        await state.clear()
+        return
+
+    photos = data.get("photos", [])
     if not photos:
         await callback.message.answer("⚠️ Нельзя создать товар без фотографий! Отправьте хотя бы 1 фото.")
-        await callback.answer()
         return
 
     desc = data.get("description", "")
@@ -181,39 +189,19 @@ async def finish_furniture_save(callback: types.CallbackQuery, state: FSMContext
         desc = f"[{kitchen_type}] {desc}"
 
     crud = CrudFurniture()
-    # 1. Создаем саму мебель в таблице furniture
     furniture = await crud.create_furniture(
         description=desc,
         category=data["category"],
-        country=data.get("country", "Россия")
+        country=data.get("country", "Россия"),
+        photos=photos
     )
 
     if not furniture:
         await callback.message.answer("❌ Ошибка базы данных при сохранении мебели.")
         await state.clear()
-        await callback.answer()
         return
 
-    # 2. Сохраняем все file_id фото в таблице furniture_photos
-    photos_saved = await crud.add_photos_to_furniture(furniture.id, photos)
-
-    if not photos_saved:
-        # Откатываем: не оставляем в базе мебель без фото
-        rolled_back = await crud.delete_furniture(furniture.id)
-        if rolled_back:
-            # Состояние не очищаем: фото остались в FSM, можно нажать «Завершить» ещё раз
-            await callback.message.answer(
-                "❌ Не удалось сохранить фотографии, мебель не добавлена.\n"
-                "Нажмите «Завершить добавление» ещё раз или отмените."
-            )
-        else:
-            await callback.message.answer(
-                f"❌ Не удалось сохранить фотографии, и мебель (ID {furniture.id}) осталась в базе без фото. "
-                "Удалите её через «Удалить мебель»."
-            )
-            await state.clear()
-        await callback.answer()
-        return
+    await state.clear()
 
     await callback.message.answer(
         "🎉 <b>Мебель успешно добавлена в каталог!</b>\n\n"
@@ -223,16 +211,14 @@ async def finish_furniture_save(callback: types.CallbackQuery, state: FSMContext
         f"📝 <b>Описание:</b>\n{escape(desc)}"
     )
 
-    await state.clear()
     # Возвращаем админа в админ-панель
-    await show_admin_panel(callback.message)
-    await callback.answer()
+    await show_admin_panel(callback.message, state)
 
 # 8. Отмена
 @router.callback_query(F.data == "cancel_furniture")
 async def cancel_furniture_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
+    await callback.answer()
     await callback.message.edit_text("🚫 Добавление мебели отменено.")
     # Возвращаем админа в админ-панель
-    await show_admin_panel(callback.message)
-    await callback.answer()
+    await show_admin_panel(callback.message, state)

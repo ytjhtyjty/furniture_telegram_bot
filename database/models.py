@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, Integer, BigInteger, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
 from database.engine import Base
 
@@ -10,7 +10,7 @@ class User(Base):
 
     # Уникальный текстовый ID в формате UUID (например: b561c9cd-d266-46ae...)
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    telegram_id = Column(Integer, unique=True, nullable=False, index=True)
+    telegram_id = Column(BigInteger, unique=True, nullable=False, index=True)
     username = Column(String, nullable=True)
     firstname = Column(String, nullable=True)
     lastname = Column(String, nullable=True)
@@ -42,7 +42,7 @@ class Furniture(Base):
     created_at = Column(DateTime, default=lambda: datetime.now())
 
     # Связка с таблицей фотографий: при удалении мебели удалятся и все её фото (delete-orphan)
-    photos = relationship("FurniturePhoto", back_populates="furniture", cascade="all, delete-orphan")
+    photos = relationship("FurniturePhoto", back_populates="furniture", cascade="all, delete-orphan", lazy="selectin")
 
 
 # 4. ТАБЛИЦА ФОТОГРАФИЙ МЕБЕЛИ

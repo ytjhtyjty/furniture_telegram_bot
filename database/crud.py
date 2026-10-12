@@ -42,6 +42,16 @@ class CrudCategory:
                 logger.exception("Ошибка БД при создании категории")
                 return False
 
+    async def get_category_by_id(self, category_id: int) -> Optional[Category]:
+        async with self.session() as session:
+            try:
+                stmt = select(Category).where(Category.id == category_id)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении категории по ID: %s", category_id)
+                return None
+
     async def check_category_by_name(self, name: str) -> bool:
         async with self.session() as session:
             try:
@@ -58,17 +68,28 @@ class CrudFurniture:
         self.session = AsyncSessionLocal
 
     # Добавить товар (мебель)
-    async def create_furniture(self, description: str, category: str, country: str) -> Optional[Furniture]:
+    async def create_furniture(
+        self,
+        description: str,
+        category: str,
+        country: str,
+        photos: Optional[list[str]] = None
+    ) -> Optional[Furniture]:
         async with self.session() as session:
             try:
+                photo_objects = [
+                    FurniturePhoto(file_id=file_id)
+                    for file_id in (photos or [])
+                ]
                 item = Furniture(
                     description=description,
                     category_name=category,
-                    country_origin=country
+                    country_origin=country,
+                    photos=photo_objects
                 )
                 session.add(item)
                 await session.commit()
-                await session.refresh(item)
+                await session.refresh(item, attribute_names=['photos'])
                 return item
             except SQLAlchemyError:
                 await session.rollback()
@@ -124,6 +145,42 @@ class CrudFurniture:
                 logger.exception("Ошибка при получении всей мебели")
                 return []
 
+    async def get_furniture_by_id(self, furniture_id: int) -> Optional[Furniture]:
+        async with self.session() as session:
+            try:
+                stmt = (
+                    select(Furniture)
+                    .options(selectinload(Furniture.photos))
+                    .where(Furniture.id == furniture_id)
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении мебели по ID %s", furniture_id)
+                return None
+
+    async def get_furniture_paginated(self, offset: int = 0, limit: int = 10) -> tuple[list[Furniture], int]:
+        async with self.session() as session:
+            try:
+                from sqlalchemy import func
+                count_stmt = select(func.count(Furniture.id))
+                count_result = await session.execute(count_stmt)
+                total = count_result.scalar_one() or 0
+
+                stmt = (
+                    select(Furniture)
+                    .options(selectinload(Furniture.photos))
+                    .order_by(Furniture.id.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                items = list(result.scalars().all())
+                return items, total
+            except SQLAlchemyError:
+                logger.exception("Ошибка при получении пагинированного списка мебели")
+                return [], 0
+
     async def delete_furniture(self, furniture_id: int) -> bool:
         async with self.session() as session:
             try:
@@ -160,6 +217,11 @@ class CrudUser:
                 user = result.scalar_one_or_none()
 
                 if user:
+                    if user.username != username or user.firstname != firstname or user.lastname != lastname:
+                        user.username = username
+                        user.firstname = firstname
+                        user.lastname = lastname
+                        await session.commit()
                     return user
 
                 new_user = User(
@@ -173,7 +235,12 @@ class CrudUser:
                 await session.refresh(new_user)
                 logger.info("Создан новый пользователь с telegram_id: %s", telegram_id)
                 return new_user
+            except IntegrityError:
+                await session.rollback()
+                stmt = select(User).where(User.telegram_id == telegram_id)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
             except SQLAlchemyError:
                 await session.rollback()
                 logger.exception("Ошибка при получении или создании пользователя %s", telegram_id)
-                return None    
+                return None

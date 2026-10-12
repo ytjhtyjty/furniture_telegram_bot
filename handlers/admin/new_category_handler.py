@@ -67,6 +67,7 @@ async def process_category_description(message: types.Message, state: FSMContext
 async def confirm_category_save(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     if not data or 'name' not in data:
+        await callback.answer()
         await callback.message.answer("⚠️ Данные устарели. Начните сначала.")
         await state.clear()
         return
@@ -75,6 +76,7 @@ async def confirm_category_save(callback: types.CallbackQuery, state: FSMContext
     success = await crud.create_category(name=data['name'], description=data.get('description', ''))
 
     await state.clear()
+    await callback.answer()
 
     if success:
         await callback.message.edit_text("✅ Категория сохранена в базе")
@@ -82,14 +84,13 @@ async def confirm_category_save(callback: types.CallbackQuery, state: FSMContext
         await callback.message.edit_text("❌ Ошибка: возможно категория с таким именем уже существует.")
 
     # Возвращаем админа в админ-панель
-    await show_admin_panel(callback.message)
-    await callback.answer()
+    await show_admin_panel(callback.message, state)
 
 # 5. Отмена в любой момент
 @router.callback_query(F.data == "cancel_category")
 async def cancel_category_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
+    await callback.answer()
     await callback.message.edit_text("🚫 Добавление категории отменено.")
     # Возвращаем админа в админ-панель
-    await show_admin_panel(callback.message)
-    await callback.answer()
+    await show_admin_panel(callback.message, state)

@@ -70,7 +70,7 @@ async def main():
         await bot(DeleteWebhook(drop_pending_updates=True))
         await set_commands(bot)
         logging.info("🚀 Бот мебельной компании успешно запущен!")
-        await dp.start_polling(bot, skip_updates=True)
+        await dp.start_polling(bot)
     finally:
         await bot.session.close()
 
