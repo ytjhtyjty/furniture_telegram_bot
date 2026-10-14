@@ -5,5 +5,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DB_PATH: /app/data/database.db
+      LOG_DIR: /app/data/logs
     volumes:
-      - ./database:/app/database
+      - ./data:/app/data
