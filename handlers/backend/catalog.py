@@ -239,7 +239,7 @@ async def _render_product(
         category, item, f"📦 Показано {product_idx + 1} из {total} товаров в категории"
     )
 
-    file_ids = [p.file_id for p in item.photos]
+    file_ids = list(dict.fromkeys(p.file_id for p in item.photos))
     kb = _product_keyboard(product_idx, total, len(file_ids) > 1, back_cb)
     await _send_photo_card(callback, file_ids[0] if file_ids else None, caption, kb)
 
@@ -258,7 +258,7 @@ async def _render_photo(
 
     product_idx = max(0, min(product_idx, len(items) - 1))
     item = items[product_idx]
-    file_ids = [p.file_id for p in item.photos]
+    file_ids = list(dict.fromkeys(p.file_id for p in item.photos))
     total_photos = len(file_ids)
 
     if total_photos == 0:
@@ -312,6 +312,7 @@ async def _browsing_context(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     category = await _find_category(data.get("catalog_category_id"))
     if category is None:
+        await state.clear()
         await _show_categories(callback)
         return None
     return (
@@ -479,4 +480,14 @@ async def back_to_categories(callback: CallbackQuery):
 @router.callback_query()
 async def stale_callback(callback: CallbackQuery):
     logger.info("Необработанный callback %r от %s", callback.data, callback.from_user.id)
-    await callback.answer("Это меню устарело. Нажмите /start, чтобы открыть актуальное.", show_alert=True)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
+        ]
+    )
+    await callback.answer("Это меню устарело.", show_alert=False)
+    await safe_edit_text(
+        callback.message,
+        "⚠️ Это меню устарело. Нажмите кнопку ниже или /start.",
+        kb,
+    )

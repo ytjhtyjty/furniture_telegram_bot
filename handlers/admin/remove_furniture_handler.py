@@ -35,7 +35,7 @@ async def _render_furniture_list_page(callback: types.CallbackQuery, page: int =
     items, total = await crud.get_furniture_paginated(offset=page * PAGE_SIZE, limit=PAGE_SIZE)
 
     if total == 0:
-        back_kb = make_row_inline_keyboards([("⬅️ Назад в админ-панель", "settings_bot")])
+        back_kb = make_row_inline_keyboards([("⬅️ В админ-панель", "settings_bot")])
         await safe_edit_text(callback.message, "📭 Каталог пуст. Нет товаров для удаления.", back_kb)
         return
 
@@ -49,12 +49,16 @@ async def _render_furniture_list_page(callback: types.CallbackQuery, page: int =
         for item in items
     ]
 
+    nav_row = []
     if page > 0:
-        buttons.append(("◀️ Назад", f"remove_furniture_page:{page - 1}"))
+        nav_row.append(("◀️", f"remove_furniture_page:{page - 1}"))
     if total_pages > 1:
-        buttons.append((f"Стр. {page + 1}/{total_pages}", "noop_page"))
+        nav_row.append((f"{page + 1}/{total_pages}", "noop_page"))
     if page < total_pages - 1:
-        buttons.append(("Вперёд ▶️", f"remove_furniture_page:{page + 1}"))
+        nav_row.append(("▶️", f"remove_furniture_page:{page + 1}"))
+    if nav_row:
+        buttons.extend(nav_row)
+
     buttons.append(("⬅️ В админ-панель", "settings_bot"))
 
     text = (
@@ -67,6 +71,7 @@ async def _render_furniture_list_page(callback: types.CallbackQuery, page: int =
 @router.callback_query(F.data == "remove_furniture")
 async def show_furniture_to_remove(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.clear()
     await state.set_state(RemoveFurnitureStates.select_furniture)
     await _render_furniture_list_page(callback, page=0)
 

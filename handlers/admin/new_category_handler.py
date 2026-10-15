@@ -95,10 +95,10 @@ async def process_category_type(callback: types.CallbackQuery, state: FSMContext
 
 @router.message(NewCategoryStates.furniture_type, NotCommand())
 async def process_category_type_text(message: types.Message):
-    await message.answer(
-        "⚠️ Выберите тип мебели кнопкой из списка выше.",
-        reply_markup=make_row_inline_keyboards(furniture_types_kb + build_cancel_kb)
-    )
+    from contextlib import suppress
+    from aiogram.exceptions import TelegramBadRequest
+    with suppress(TelegramBadRequest):
+        await message.delete()
 
 
 @router.message(NewCategoryStates.description_category, NotCommand())
@@ -156,9 +156,9 @@ async def confirm_category_save(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data == "cancel_category")
 async def cancel_category_handler(callback: types.CallbackQuery, state: FSMContext):
-    already_cancelled = await state.get_state() is None
     await callback.answer()
-    if already_cancelled:
+    current_state = await state.get_state()
+    if current_state is None:
         return
     await state.clear()
     await safe_edit_text(callback.message, "🚫 Добавление категории отменено.")

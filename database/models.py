@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import Column, String, Integer, BigInteger, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
@@ -13,7 +13,7 @@ class User(Base):
     username = Column(String, nullable=True)
     firstname = Column(String, nullable=True)
     lastname = Column(String, nullable=True)
-    registration_date = Column(DateTime, default=lambda: datetime.now())
+    registration_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_admin = Column(Boolean, default=False, nullable=False) # Флаг: админ или клиент
 
 
@@ -24,7 +24,7 @@ class Category(Base):
     name = Column(String, nullable=False, unique=True)
     description = Column(Text, nullable=True)
     furniture_type = Column(String, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f"<Category(id={self.id}, name='{self.name}')>"
@@ -37,7 +37,7 @@ class Furniture(Base):
     description = Column(Text, nullable=True)
     category_name = Column(String, ForeignKey('categories.name'), nullable=False)
     country_origin = Column(String, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     photos = relationship("FurniturePhoto", back_populates="furniture", cascade="all, delete-orphan", lazy="selectin")
 
@@ -49,7 +49,7 @@ class FurniturePhoto(Base):
     furniture_id = Column(Integer, ForeignKey('furniture.id'), nullable=False)
     file_id = Column(String, nullable=False)
     file_path = Column(String, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     furniture = relationship("Furniture", back_populates="photos")
 
@@ -61,6 +61,6 @@ class Cooperation(Base):
     name = Column(String, nullable=False)
     phone = Column(String, nullable=False)
     message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_processed = Column(Boolean, default=False)
 

@@ -6,6 +6,7 @@ from aiogram import Router, F, types
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 from database.crud import CrudCategory, CrudUser, CrudCooperation
 from states.states import CooperationStates
@@ -34,6 +35,9 @@ EMPTY_TEXT = "📭 Каталог пока пуст, загляните позж
 NAME_MAX = 100
 MESSAGE_MAX = 1000
 PHONE_ALLOWED = re.compile(r"^[\d\s()+\-]+$")
+
+_CANCEL_TEXT = "❌ Отмена"
+_SKIP_TEXT = "⏭ Пропустить"
 
 
 async def build_main_menu(user_id: int) -> tuple[str, types.InlineKeyboardMarkup]:
@@ -91,9 +95,37 @@ async def about_company_handler(callback: types.CallbackQuery):
 
 
 def _cooperation_cancel_kb() -> types.InlineKeyboardMarkup:
-    return make_row_inline_keyboards([
-        ("❌ Отмена", "cooperation_cancel"),
-    ])
+    return make_row_inline_keyboards([(_CANCEL_TEXT, "cooperation_cancel")])
+
+
+def _cancel_reply_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=_CANCEL_TEXT)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def _phone_request_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Отправить мой номер", request_contact=True)],
+            [KeyboardButton(text=_CANCEL_TEXT)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def _message_step_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=_SKIP_TEXT)],
+            [KeyboardButton(text=_CANCEL_TEXT)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 def _is_valid_phone(phone: str) -> bool:
@@ -103,13 +135,13 @@ def _is_valid_phone(phone: str) -> bool:
     return 10 <= digits <= 15
 
 
-async def _notify_admins(bot, name: str, phone: str, text: str | None, user: types.User) -> None:
+async def _notify_admins(bot, name: str, phone: str, user_message: str | None, user: types.User) -> None:
     username = f" (@{escape(user.username)})" if user.username else ""
     notification = (
         "🔔 <b>Новая заявка на сотрудничество</b>\n\n"
         f"👤 {escape(name)}{username}\n"
         f"📞 {escape(phone)}\n"
-        f"📝 {escape(text or '—')}"
+        f"📝 {escape(user_message or '—')}"
     )
     kb = make_row_inline_keyboards([("🤝 Открыть заявки", "cooperation_requests")])
     for admin_id in ConfigBot.ADMIN_IDS:
@@ -135,67 +167,97 @@ async def cooperation_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(CooperationStates.name, NotCommand())
 async def cooperation_name(message: types.Message, state: FSMContext):
+    if (message.text or "").strip() == _CANCEL_TEXT:
+        await _do_cooperation_cancel(message, state)
+        return
+
     name = (message.text or "").strip()
     if not name or len(name) > NAME_MAX:
         await message.answer(
             f"⚠️ Введите корректное имя (до {NAME_MAX} символов):",
-            reply_markup=_cooperation_cancel_kb(),
+            reply_markup=_cancel_reply_kb(),
         )
         return
     await state.update_data(name=name)
     await state.set_state(CooperationStates.phone)
     await message.answer(
-        "📞 Введите ваш <b>телефон</b>:",
-        reply_markup=_cooperation_cancel_kb(),
+        "📞 Введите ваш <b>телефон</b> или нажмите кнопку ниже:",
+        reply_markup=_phone_request_kb(),
     )
 
 
 @router.message(CooperationStates.phone, NotCommand())
 async def cooperation_phone(message: types.Message, state: FSMContext):
+    if (message.text or "").strip() == _CANCEL_TEXT:
+        await _do_cooperation_cancel(message, state)
+        return
+
     phone = message.contact.phone_number if message.contact else (message.text or "").strip()
     if not phone or not _is_valid_phone(phone):
         await message.answer(
             "⚠️ Введите корректный телефон, например: <code>+7 900 123-45-67</code>",
-            reply_markup=_cooperation_cancel_kb(),
+            reply_markup=_phone_request_kb(),
         )
         return
     await state.update_data(phone=phone)
     await state.set_state(CooperationStates.message)
     await message.answer(
         "📝 Коротко опишите, что вас интересует:\n\n"
-        "(Например: «Хочу оптом», «Дизайнер», «Партнёрство»)",
-        reply_markup=_cooperation_cancel_kb(),
+        "(Например: «Хочу оптом», «Дизайнер», «Партнёрство»)\n\n"
+        "<i>Или нажмите «Пропустить», если не хотите оставлять комментарий.</i>",
+        reply_markup=_message_step_kb(),
     )
 
 
 @router.message(CooperationStates.message, NotCommand())
 async def cooperation_message(message: types.Message, state: FSMContext):
-    text = (message.text or "").strip()
+    raw = (message.text or "").strip()
+
+    if raw == _CANCEL_TEXT:
+        await _do_cooperation_cancel(message, state)
+        return
+
+    msg_text = None if raw == _SKIP_TEXT else raw
     data = await state.get_data()
     await state.clear()
 
     if "name" not in data or "phone" not in data:
-        await message.answer("⚠️ Данные заявки устарели. Начните заново.")
+        await message.answer(
+            "⚠️ Данные заявки устарели. Начните заново.",
+            reply_markup=types.ReplyKeyboardRemove(),
+        )
     else:
-        text = text[:MESSAGE_MAX] if text else None
+        trimmed = msg_text[:MESSAGE_MAX] if msg_text else None
         ok = await CrudCooperation().create_request(
             name=data["name"],
             phone=data["phone"],
-            message=text,
+            message=trimmed,
         )
 
         if ok:
             await message.answer(
                 "✅ <b>Заявка отправлена!</b>\n\n"
-                "Мы свяжемся с вами в ближайшее время."
+                "Мы свяжемся с вами в ближайшее время.",
+                reply_markup=types.ReplyKeyboardRemove(),
             )
-            await _notify_admins(message.bot, data["name"], data["phone"], text, message.from_user)
+            await _notify_admins(message.bot, data["name"], data["phone"], trimmed, message.from_user)
         else:
             await message.answer(
-                "❌ Не удалось отправить заявку. Попробуйте позже."
+                "❌ Не удалось отправить заявку. Попробуйте позже.",
+                reply_markup=types.ReplyKeyboardRemove(),
             )
 
     menu_text, menu_kb = await build_main_menu(message.from_user.id)
+    await message.answer(menu_text, reply_markup=menu_kb)
+
+
+async def _do_cooperation_cancel(message: types.Message, state: FSMContext) -> None:
+    await state.clear()
+    menu_text, menu_kb = await build_main_menu(message.from_user.id)
+    await message.answer(
+        "🚫 Заявка отменена.",
+        reply_markup=types.ReplyKeyboardRemove(),
+    )
     await message.answer(menu_text, reply_markup=menu_kb)
 
 
