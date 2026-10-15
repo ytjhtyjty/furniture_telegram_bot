@@ -36,6 +36,7 @@ router = Router()
 CAPTION_LIMIT = 1024
 NO_ITEMS_TEXT = "В этой категории пока нет товаров"
 BACK_TO_CATEGORIES = "back_to_categories"
+NO_FILTER = "-"
 
 
 def _country_line(country: str | None) -> str:
@@ -48,9 +49,17 @@ def _country_line(country: str | None) -> str:
     return ""
 
 
-def _choices_kb(options: list[tuple[str, str]], back_cb: str) -> InlineKeyboardMarkup:
+def _view(category_id: int, filter_cb: str) -> str:
+    return f"{category_id}:{filter_cb}"
+
+
+def _back_cb_for(category_id: int, filter_cb: str) -> str:
+    return BACK_TO_CATEGORIES if filter_cb == NO_FILTER else f"back_to_category:{category_id}"
+
+
+def _choices_kb(options: list[tuple[str, str]], category_id: int, back_cb: str) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=text, callback_data=cb)]
+        [InlineKeyboardButton(text=text, callback_data=f"catalog_filter:{_view(category_id, cb)}")]
         for text, cb in options
         if cb != "back_to_main"
     ]
@@ -65,6 +74,7 @@ def _back_kb(back_cb: str) -> InlineKeyboardMarkup:
 
 
 def _product_keyboard(
+    view: str,
     product_idx: int,
     total_products: int,
     has_multiple_photos: bool,
@@ -73,9 +83,9 @@ def _product_keyboard(
     rows = []
 
     if total_products > 1:
-        prev_cb = f"product_nav:{product_idx - 1}" if product_idx > 0 else "noop"
+        prev_cb = f"product_nav:{view}:{product_idx - 1}" if product_idx > 0 else "noop"
         next_cb = (
-            f"product_nav:{product_idx + 1}"
+            f"product_nav:{view}:{product_idx + 1}"
             if product_idx < total_products - 1
             else "noop"
         )
@@ -91,7 +101,7 @@ def _product_keyboard(
         rows.append([
             InlineKeyboardButton(
                 text="📷 Посмотреть подробнее",
-                callback_data=f"photo_nav:{product_idx}:0",
+                callback_data=f"photo_nav:{view}:{product_idx}:0",
             )
         ])
 
@@ -100,15 +110,16 @@ def _product_keyboard(
 
 
 def _photo_keyboard(
+    view: str,
     product_idx: int,
     photo_idx: int,
     total_photos: int,
 ) -> InlineKeyboardMarkup:
     prev_cb = (
-        f"photo_nav:{product_idx}:{photo_idx - 1}" if photo_idx > 0 else "noop"
+        f"photo_nav:{view}:{product_idx}:{photo_idx - 1}" if photo_idx > 0 else "noop"
     )
     next_cb = (
-        f"photo_nav:{product_idx}:{photo_idx + 1}"
+        f"photo_nav:{view}:{product_idx}:{photo_idx + 1}"
         if photo_idx < total_photos - 1
         else "noop"
     )
@@ -123,7 +134,7 @@ def _photo_keyboard(
         [
             InlineKeyboardButton(
                 text="⬅️ Назад к товару",
-                callback_data=f"back_to_product:{product_idx}",
+                callback_data=f"back_to_product:{view}:{product_idx}",
             )
         ],
     ])
@@ -222,11 +233,11 @@ async def _get_items(category: Category, country: str | None, kitchen_type: str 
 async def _render_product(
     callback: CallbackQuery,
     category: Category,
+    filter_cb: str,
     items: list[Furniture],
     product_idx: int,
-    back_cb: str,
 ) -> None:
-    """Карточка товара: одно фото + описание + навигация по товарам."""
+    back_cb = _back_cb_for(category.id, filter_cb)
     if not items:
         await _show(callback, NO_ITEMS_TEXT, _back_kb(back_cb))
         return
@@ -240,20 +251,22 @@ async def _render_product(
     )
 
     file_ids = [p.file_id for p in item.photos]
-    kb = _product_keyboard(product_idx, total, len(file_ids) > 1, back_cb)
+    kb = _product_keyboard(
+        _view(category.id, filter_cb), product_idx, total, len(file_ids) > 1, back_cb
+    )
     await _send_photo_card(callback, file_ids[0] if file_ids else None, caption, kb)
 
 
 async def _render_photo(
     callback: CallbackQuery,
     category: Category,
+    filter_cb: str,
     items: list[Furniture],
     product_idx: int,
     photo_idx: int,
-    back_cb: str,
 ) -> None:
     if not items:
-        await _show(callback, NO_ITEMS_TEXT, _back_kb(back_cb))
+        await _show(callback, NO_ITEMS_TEXT, _back_kb(_back_cb_for(category.id, filter_cb)))
         return
 
     product_idx = max(0, min(product_idx, len(items) - 1))
@@ -262,64 +275,59 @@ async def _render_photo(
     total_photos = len(file_ids)
 
     if total_photos == 0:
-        await _render_product(callback, category, items, product_idx, back_cb)
+        await _render_product(callback, category, filter_cb, items, product_idx)
         return
 
     photo_idx = max(0, min(photo_idx, total_photos - 1))
     caption = _build_caption(category, item, f"📷 Фото {photo_idx + 1} из {total_photos}")
-    kb = _photo_keyboard(product_idx, photo_idx, total_photos)
+    kb = _photo_keyboard(_view(category.id, filter_cb), product_idx, photo_idx, total_photos)
     await _send_photo_card(callback, file_ids[photo_idx], caption, kb)
-
-
-async def _show_products(
-    callback: CallbackQuery,
-    category: Category,
-    country: str | None,
-    kitchen_type: str | None,
-    back_cb: str,
-) -> None:
-    items = await _get_items(category, country, kitchen_type)
-    await _render_product(callback, category, items, 0, back_cb)
 
 
 async def _open_category(callback: CallbackQuery, state: FSMContext, category: Category) -> None:
     await state.set_state(None)
-    await state.update_data(
-        catalog_category_id=category.id,
-        catalog_country=None,
-        catalog_kitchen_type=None,
-        catalog_back_cb=BACK_TO_CATEGORIES,
-    )
 
     mode = get_category_mode(category)
     if mode == MODE_KITCHEN:
         await _show(
             callback,
             "📐 Выберите тип кухни:",
-            _choices_kb(kitchen_subcategory_inline_kb, BACK_TO_CATEGORIES),
+            _choices_kb(kitchen_subcategory_inline_kb, category.id, BACK_TO_CATEGORIES),
         )
     elif mode == MODE_COUNTRY:
         await _show(
             callback,
             "Отлично! Теперь выберите страну производства:",
-            _choices_kb(country_of_origin_kb, BACK_TO_CATEGORIES),
+            _choices_kb(country_of_origin_kb, category.id, BACK_TO_CATEGORIES),
         )
     else:
-        await _show_products(callback, category, None, None, BACK_TO_CATEGORIES)
+        items = await _get_items(category, None, None)
+        await _render_product(callback, category, NO_FILTER, items, 0)
 
 
-async def _browsing_context(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    category = await _find_category(data.get("catalog_category_id"))
+async def _resolve_view(
+    callback: CallbackQuery,
+    category_id: str,
+    filter_cb: str,
+) -> tuple[Category, str, list[Furniture]] | None:
+    country, kitchen_type = None, None
+    if filter_cb in COUNTRY_BY_CB:
+        country = COUNTRY_BY_CB[filter_cb]
+    elif filter_cb in KITCHEN_TYPE_BY_CB:
+        country, kitchen_type = KITCHEN_COUNTRY, KITCHEN_TYPE_BY_CB[filter_cb]
+    elif filter_cb != NO_FILTER:
+        return None
+
+    try:
+        category = await _find_category(int(category_id))
+    except ValueError:
+        category = None
     if category is None:
         await _show_categories(callback)
         return None
-    return (
-        category,
-        data.get("catalog_country"),
-        data.get("catalog_kitchen_type"),
-        data.get("catalog_back_cb") or BACK_TO_CATEGORIES,
-    )
+
+    items = await _get_items(category, country, kitchen_type)
+    return category, filter_cb, items
 
 
 @router.callback_query(F.data.startswith("category:"))
@@ -340,109 +348,81 @@ async def open_category(callback: CallbackQuery, state: FSMContext):
     await _open_category(callback, state, category)
 
 
-@router.callback_query(F.data.in_(frozenset(KITCHEN_TYPE_BY_CB)))
-async def choose_kitchen_type(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    if not _has_message(callback):
-        return
-
-    context = await _browsing_context(callback, state)
-    if context is None:
-        return
-    category = context[0]
-
-    kitchen_type = KITCHEN_TYPE_BY_CB[callback.data]
-    back_cb = f"back_to_category:{category.id}"
-
-    await state.update_data(
-        catalog_country=KITCHEN_COUNTRY,
-        catalog_kitchen_type=kitchen_type,
-        catalog_back_cb=back_cb,
-    )
-    await _show_products(callback, category, KITCHEN_COUNTRY, kitchen_type, back_cb)
-
-
-@router.callback_query(F.data.in_(frozenset(COUNTRY_BY_CB)))
-async def choose_country(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    if not _has_message(callback):
-        return
-
-    context = await _browsing_context(callback, state)
-    if context is None:
-        return
-    category = context[0]
-
-    country = COUNTRY_BY_CB[callback.data]
-    back_cb = f"back_to_category:{category.id}"
-
-    await state.update_data(
-        catalog_country=country,
-        catalog_kitchen_type=None,
-        catalog_back_cb=back_cb,
-    )
-    await _show_products(callback, category, country, None, back_cb)
-
-
-@router.callback_query(F.data.startswith("product_nav:"))
-async def navigate_products(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    if not _has_message(callback):
-        return
-    try:
-        idx = int(callback.data.split(":", 1)[1])
-    except ValueError:
-        return
-
-    context = await _browsing_context(callback, state)
-    if context is None:
-        return
-    category, country, kitchen_type, back_cb = context
-
-    items = await _get_items(category, country, kitchen_type)
-    await _render_product(callback, category, items, idx, back_cb)
-
-
-@router.callback_query(F.data.startswith("photo_nav:"))
-async def navigate_photos(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("catalog_filter:"))
+async def choose_filter(callback: CallbackQuery):
     await callback.answer()
     if not _has_message(callback):
         return
     parts = callback.data.split(":")
     if len(parts) != 3:
         return
-    try:
-        product_idx = int(parts[1])
-        photo_idx = int(parts[2])
-    except ValueError:
+
+    resolved = await _resolve_view(callback, parts[1], parts[2])
+    if resolved is None:
         return
-
-    context = await _browsing_context(callback, state)
-    if context is None:
-        return
-    category, country, kitchen_type, back_cb = context
-
-    items = await _get_items(category, country, kitchen_type)
-    await _render_photo(callback, category, items, product_idx, photo_idx, back_cb)
+    category, filter_cb, items = resolved
+    await _render_product(callback, category, filter_cb, items, 0)
 
 
-@router.callback_query(F.data.startswith("back_to_product:"))
-async def back_to_product(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("product_nav:"))
+async def navigate_products(callback: CallbackQuery):
     await callback.answer()
     if not _has_message(callback):
         return
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        return
     try:
-        product_idx = int(callback.data.split(":", 1)[1])
+        idx = int(parts[3])
     except ValueError:
         return
 
-    context = await _browsing_context(callback, state)
-    if context is None:
+    resolved = await _resolve_view(callback, parts[1], parts[2])
+    if resolved is None:
         return
-    category, country, kitchen_type, back_cb = context
+    category, filter_cb, items = resolved
+    await _render_product(callback, category, filter_cb, items, idx)
 
-    items = await _get_items(category, country, kitchen_type)
-    await _render_product(callback, category, items, product_idx, back_cb)
+
+@router.callback_query(F.data.startswith("photo_nav:"))
+async def navigate_photos(callback: CallbackQuery):
+    await callback.answer()
+    if not _has_message(callback):
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 5:
+        return
+    try:
+        product_idx = int(parts[3])
+        photo_idx = int(parts[4])
+    except ValueError:
+        return
+
+    resolved = await _resolve_view(callback, parts[1], parts[2])
+    if resolved is None:
+        return
+    category, filter_cb, items = resolved
+    await _render_photo(callback, category, filter_cb, items, product_idx, photo_idx)
+
+
+@router.callback_query(F.data.startswith("back_to_product:"))
+async def back_to_product(callback: CallbackQuery):
+    await callback.answer()
+    if not _has_message(callback):
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        return
+    try:
+        product_idx = int(parts[3])
+    except ValueError:
+        return
+
+    resolved = await _resolve_view(callback, parts[1], parts[2])
+    if resolved is None:
+        return
+    category, filter_cb, items = resolved
+    await _render_product(callback, category, filter_cb, items, product_idx)
 
 
 @router.callback_query(F.data == "noop")
