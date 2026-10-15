@@ -104,14 +104,15 @@
 ## Что нужно для запуска
 
 1. **Компьютер или сервер**, который будет включён, пока бот должен работать (Windows, Linux или macOS). Для постоянной работы удобнее недорогой VPS.
-2. **Python 3.10 или новее** (рекомендуется 3.11). Скачать: <https://www.python.org/downloads/>.
+2. **Python 3.11 или новее**. Скачать: <https://www.python.org/downloads/>.
    При установке на Windows поставьте галочку **«Add Python to PATH»**.
-   *Если запускаете через Docker, Python устанавливать не нужно, см. [ниже](#запуск-через-docker).*
-3. **Токен бота** от Telegram:
+3. **Poetry** (менеджер зависимостей). Установка: `pip install poetry` (или по [официальной инструкции](https://python-poetry.org/docs/#installation)).
+   *Если запускаете через Docker, Python и Poetry устанавливать не нужно, см. [ниже](#запуск-через-docker).*
+4. **Токен бота** от Telegram:
    - откройте в Telegram [@BotFather](https://t.me/BotFather);
    - отправьте команду `/newbot` и следуйте подсказкам (имя и логин бота);
    - в конце BotFather пришлёт токен вида `123456789:AAAbbbCCC...`. Сохраните его и никому не показывайте.
-4. **Ваш Telegram ID** (число): напишите боту [@userinfobot](https://t.me/userinfobot), он ответит вашим ID.
+5. **Ваш Telegram ID** (число): напишите боту [@userinfobot](https://t.me/userinfobot), он ответит вашим ID.
 
 ---
 
@@ -122,28 +123,22 @@
 ### Windows
 
 ```bat
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+poetry install
 copy .env.example .env
 notepad .env
-python main.py
+poetry run python main.py
 ```
-
-> Если в PowerShell команда `activate` заблокирована, используйте обычную командную строку (`cmd`) или выполните `venv\Scripts\activate.bat`.
 
 ### Linux / macOS
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+poetry install
 cp .env.example .env
 nano .env
-python main.py
+poetry run python main.py
 ```
 
-Что делают эти команды: создают изолированное окружение, устанавливают нужные библиотеки, создают файл настроек `.env` и запускают бота. В `.env` заполните токен и свой ID (см. следующий раздел).
+Что делают эти команды: Poetry создаёт изолированное виртуальное окружение, устанавливает все библиотеки из `poetry.lock`, вы создаёте файл настроек `.env` и запускаете бота. В `.env` заполните токен и свой ID (см. следующий раздел).
 
 **Бот запущен, если** в консоли появились строки:
 
@@ -156,7 +151,11 @@ Run polling for bot @имя_вашего_бота
 
 **Остановка:** нажмите **Ctrl+C** в окне с ботом (не закрывайте окно крестиком, иначе журнал сохранится только при следующем запуске).
 
-**Следующие запуски** проще: активируйте окружение (`venv\Scripts\activate`) и выполните `python main.py`.
+**Следующие запуски:**
+```bash
+poetry run python main.py
+```
+*(или активируйте виртуальное окружение командой `poetry shell` и запускайте `python main.py`).*
 
 ---
 
