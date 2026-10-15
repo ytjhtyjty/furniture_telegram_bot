@@ -3,7 +3,7 @@ name = "furniture-telegram-bot"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "eco1kd",email = "deniskajkov03@gmail.com"}
+    {name = "eco1kd", email = "deniskajkov03@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -39,6 +39,8 @@ dependencies = [
     "yarl (==1.25.1)"
 ]
 
+[tool.poetry]
+package-mode = false
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
