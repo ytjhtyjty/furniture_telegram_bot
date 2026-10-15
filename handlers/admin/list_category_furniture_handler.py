@@ -42,7 +42,8 @@ async def list_categories_handler(callback: types.CallbackQuery):
     chunks.append(current_chunk)
 
     for i, chunk in enumerate(chunks):
-        reply_markup = back_kb if i == len(chunks) - 1 else None
+        is_last = i == len(chunks) - 1
+        reply_markup = back_kb if is_last else None
         if i == 0:
             await safe_edit_text(callback.message, chunk, reply_markup)
         else:

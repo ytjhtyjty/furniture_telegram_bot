@@ -3,12 +3,15 @@ import logging
 import os
 import sys
 from datetime import datetime
+from colorlog import ColoredFormatter
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.getenv("LOG_DIR") or os.path.join(BASE_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "logs.txt")
 
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+
+COLOR_FORMAT = "%(log_color)s%(asctime)s - %(levelname)s - %(name)s - %(message)s%(reset)s"
 
 _file_handler: logging.FileHandler | None = None
 
@@ -42,20 +45,32 @@ def setup_logging(level: int = logging.INFO) -> None:
     if os.path.exists(LOG_FILE):
         leftover = _archive_current_log(datetime.fromtimestamp(os.path.getmtime(LOG_FILE)))
 
-    formatter = logging.Formatter(LOG_FORMAT)
+    file_formatter = logging.Formatter(LOG_FORMAT)
+
+    console_formatter = ColoredFormatter(
+        COLOR_FORMAT,
+        datefmt=None,
+        reset=True,
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'green',
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'bold_red',
+        }
+    )
 
     console = logging.StreamHandler(sys.stderr)
-    console.setFormatter(formatter)
+    console.setFormatter(console_formatter)
 
     _file_handler = logging.FileHandler(LOG_FILE, mode="w", encoding="utf-8")
-    _file_handler.setFormatter(formatter)
+    _file_handler.setFormatter(file_formatter)
 
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers.clear()
     root.addHandler(console)
     root.addHandler(_file_handler)
-
 
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
@@ -65,7 +80,6 @@ def setup_logging(level: int = logging.INFO) -> None:
     if leftover:
         logging.warning("Предыдущий запуск завершился аварийно, его лог сохранён: %s",
                         os.path.basename(leftover))
-
 
     atexit.register(shutdown_logging)
 

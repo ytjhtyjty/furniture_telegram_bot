@@ -34,7 +34,6 @@ _user_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 def _choice_kb(template: list[tuple[str, str]]) -> types.InlineKeyboardMarkup:
-    """Варианты из шаблона без клиентской кнопки «Назад» + кнопка «Отменить»."""
     options = [(text, cb) for text, cb in template if cb != "back_to_main"]
     return make_row_inline_keyboards(options + furniture_cancel_kb)
 
@@ -100,7 +99,7 @@ async def process_furniture_category(message: types.Message, state: FSMContext):
 
 async def _ask_description(message: types.Message, state: FSMContext) -> None:
     await state.set_state(NewFurnitureStates.description)
-    await message.edit_text(
+    await message.answer(
         "<b>Шаг 3:</b> Отправьте подробное описание товара в одном сообщении:\n"
         "• Название\n"
         "• Габариты (длина x ширина x высота)\n"
@@ -155,7 +154,7 @@ async def process_furniture_description(message: types.Message, state: FSMContex
 
 async def init_photo_upload(message: types.Message, state: FSMContext):
     await state.set_state(NewFurnitureStates.photos)
-    await state.update_data(photos=[], photo_limit_warned=False)  # Пустой список для file_id
+    await state.update_data(photos=[], photo_limit_warned=False)
 
     await message.answer(
         "📸 <b>Шаг 4: Загрузка фотографий</b>\n\n"
@@ -252,10 +251,13 @@ async def finish_furniture_save(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data == "cancel_furniture")
 async def cancel_furniture_handler(callback: types.CallbackQuery, state: FSMContext):
-    already_cancelled = await state.get_state() is None
     await callback.answer()
-    if already_cancelled:
+    current_state = await state.get_state()
+    if current_state is None:
         return
     await state.clear()
-    await safe_edit_text(callback.message, "🚫 Добавление мебели отменено.")
+    await callback.message.answer(
+        "🚫 Добавление мебели отменено.",
+        reply_markup=types.ReplyKeyboardRemove(),
+    )
     await show_admin_panel(callback.message, state, admin=callback.from_user)

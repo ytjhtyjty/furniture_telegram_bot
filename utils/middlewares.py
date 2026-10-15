@@ -29,6 +29,9 @@ class LoggingMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         user = data.get("event_from_user")
-        who = f"{user.id} (@{user.username})" if user and user.username else (user.id if user else "?")
+        if user:
+            who = f"{user.id} (@{user.username})" if user.username else str(user.id)
+        else:
+            who = "?"
         logger.info("Пользователь %s: %s", who, _describe(event))
         return await handler(event, data)
