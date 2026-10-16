@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from database.crud import CrudFurniture
 from keyboard.keyboard_builder import make_row_inline_keyboards
 from states.states import RemoveFurnitureStates
+from utils.catalog_utils import parse_id_and_page
 from utils.messages import safe_edit_text
 
 router = Router()
@@ -18,15 +19,6 @@ def _snippet(description: str | None) -> str:
     text = lines[0].strip() if lines else "без описания"
     return text if len(text) <= SNIPPET_LEN else text[:SNIPPET_LEN].rstrip() + "…"
 
-
-def _parse_id_and_page(data: str) -> tuple[int, int] | None:
-    parts = data.split(":")
-    if len(parts) != 3:
-        return None
-    try:
-        return int(parts[1]), int(parts[2])
-    except ValueError:
-        return None
 
 
 async def _render_furniture_list_page(callback: types.CallbackQuery, page: int = 0):
@@ -93,7 +85,7 @@ async def noop_page_handler(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("ask_delete:"))
 async def ask_delete_furniture(callback: types.CallbackQuery):
-    parsed = _parse_id_and_page(callback.data)
+    parsed = parse_id_and_page(callback.data)
     if parsed is None:
         await callback.answer()
         return
@@ -125,7 +117,7 @@ async def ask_delete_furniture(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("confirm_delete:"))
 async def confirm_delete_furniture(callback: types.CallbackQuery):
-    parsed = _parse_id_and_page(callback.data)
+    parsed = parse_id_and_page(callback.data)
     if parsed is None:
         await callback.answer()
         return

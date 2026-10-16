@@ -2,13 +2,12 @@ from html import escape
 
 from aiogram import Router, F, types
 from database.crud import CrudCategory
-from keyboard.button_template import furniture_types_kb
 from keyboard.keyboard_builder import make_row_inline_keyboards
+from utils.catalog_utils import FURNITURE_TYPE_TITLES
 from utils.messages import safe_edit_text
 
 router = Router()
 
-FURNITURE_TYPE_TITLES = dict((cb, text) for text, cb in furniture_types_kb)
 CHUNK_LIMIT = 3800
 
 

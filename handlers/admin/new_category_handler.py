@@ -6,14 +6,12 @@ from states.states import NewCategoryStates
 from keyboard.keyboard_builder import make_row_inline_keyboards
 from keyboard.button_template import build_cancel_kb, furniture_types_kb, skip_description_kb
 from database.crud import CrudCategory
-from utils.catalog_utils import CATEGORY_DESCRIPTION_MAX, CATEGORY_NAME_MAX
+from utils.catalog_utils import CATEGORY_DESCRIPTION_MAX, CATEGORY_NAME_MAX, FURNITURE_TYPE_TITLES
 from utils.filters import NotCommand
 from utils.messages import safe_edit_text
 from .main_admin import show_admin_panel
 
 router = Router()
-
-FURNITURE_TYPE_TITLES = dict((cb, text) for text, cb in furniture_types_kb)
 
 
 async def _ask_confirmation(message: types.Message, state: FSMContext) -> None:

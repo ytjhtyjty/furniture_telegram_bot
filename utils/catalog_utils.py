@@ -54,3 +54,19 @@ def split_kitchen_prefix(description: str | None) -> tuple[str | None, str]:
         if text.startswith(prefix):
             return kitchen_type, text[len(prefix):].lstrip()
     return None, text
+
+
+from keyboard.button_template import furniture_types_kb  # noqa: E402
+
+FURNITURE_TYPE_TITLES: dict[str, str] = {cb: text for text, cb in furniture_types_kb}
+
+
+def parse_id_and_page(data: str) -> tuple[int, int] | None:
+    """Разбирает callback_data вида 'prefix:id:page' и возвращает (id, page)."""
+    parts = data.split(":")
+    if len(parts) != 3:
+        return None
+    try:
+        return int(parts[1]), int(parts[2])
+    except ValueError:
+        return None

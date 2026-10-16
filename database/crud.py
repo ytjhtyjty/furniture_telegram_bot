@@ -56,11 +56,13 @@ class CrudCategory:
                 return None
 
     async def check_category_by_name(self, name: str) -> bool:
+        """Проверяет, существует ли категория с таким именем (без учёта регистра)."""
         async with self.session() as session:
             try:
-                result = await session.execute(select(Category.name))
-                target = name.strip().casefold()
-                return any(existing.strip().casefold() == target for existing in result.scalars())
+                target = name.strip().lower()
+                stmt = select(Category).where(func.lower(Category.name) == target)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none() is not None
             except SQLAlchemyError:
                 logger.exception("Ошибка при проверке категории: %s", name)
                 return False

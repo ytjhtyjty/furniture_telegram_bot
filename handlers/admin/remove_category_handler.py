@@ -4,21 +4,12 @@ from aiogram import Router, F, types
 
 from database.crud import CrudCategory
 from keyboard.keyboard_builder import make_row_inline_keyboards
+from utils.catalog_utils import parse_id_and_page
 from utils.messages import safe_edit_text
 
 router = Router()
 
 PAGE_SIZE = 8
-
-
-def _parse_id_and_page(data: str) -> tuple[int, int] | None:
-    parts = data.split(":")
-    if len(parts) != 3:
-        return None
-    try:
-        return int(parts[1]), int(parts[2])
-    except ValueError:
-        return None
 
 
 async def _render_category_list_page(callback: types.CallbackQuery, page: int = 0):
@@ -71,7 +62,7 @@ async def change_remove_category_page(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("ask_delete_category:"))
 async def ask_delete_category(callback: types.CallbackQuery):
-    parsed = _parse_id_and_page(callback.data)
+    parsed = parse_id_and_page(callback.data)
     if parsed is None:
         await callback.answer()
         return
@@ -109,7 +100,7 @@ async def ask_delete_category(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("confirm_delete_category:"))
 async def confirm_delete_category(callback: types.CallbackQuery):
-    parsed = _parse_id_and_page(callback.data)
+    parsed = parse_id_and_page(callback.data)
     if parsed is None:
         await callback.answer()
         return

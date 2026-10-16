@@ -1,5 +1,4 @@
 import asyncio
-from collections import defaultdict
 from html import escape
 
 from aiogram import Router, F, types
@@ -30,7 +29,7 @@ router = Router()
 
 CANCEL_TEXT = "❌ Отменить"
 
-_user_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+_user_locks: dict[int, asyncio.Lock] = {}
 
 
 def _choice_kb(template: list[tuple[str, str]]) -> types.InlineKeyboardMarkup:
@@ -166,7 +165,7 @@ async def init_photo_upload(message: types.Message, state: FSMContext):
 
 @router.message(NewFurnitureStates.photos, F.photo)
 async def process_incoming_photo(message: types.Message, state: FSMContext):
-    async with _user_locks[message.from_user.id]:
+    async with _user_locks.setdefault(message.from_user.id, asyncio.Lock()):
         data = await state.get_data()
         photos = data.get("photos", [])
 
@@ -206,7 +205,7 @@ async def process_not_photo(message: types.Message):
 async def finish_furniture_save(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
-    async with _user_locks[callback.from_user.id]:
+    async with _user_locks.setdefault(callback.from_user.id, asyncio.Lock()):
         data = await state.get_data()
 
         if not data or "category" not in data or "description" not in data:
